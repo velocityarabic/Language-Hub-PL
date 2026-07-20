@@ -20,7 +20,10 @@ SCENIC_STYLES = [
 
 def generate_scenic_image(category_english: str, category_polish: str, output_path: str):
     if POLLINATIONS_API_KEY:
-        for attempt in range(3):
+        import time as ttime
+        session = requests.Session()
+        session.timeout = 300
+        for attempt in range(4):
             style = random.choice(SCENIC_STYLES)
             prompt = (
                 f"Professional YouTube thumbnail for Polish language learning video. "
@@ -31,12 +34,12 @@ def generate_scenic_image(category_english: str, category_polish: str, output_pa
                 f"At bottom: 'VELOCITY POLISH'. Also: '10 MINUTE LESSON' badge."
             )
             try:
-                resp = requests.post("https://gen.pollinations.ai/v1/images/generations", json={
+                resp = session.post("https://gen.pollinations.ai/v1/images/generations", json={
                     "model": "gpt-image-2",
                     "prompt": prompt,
                     "n": 1,
                     "size": "1792x1024",
-                }, headers={"Authorization": f"Bearer {POLLINATIONS_API_KEY}"}, timeout=120)
+                }, headers={"Authorization": f"Bearer {POLLINATIONS_API_KEY}"}, timeout=300)
                 if resp.status_code == 200 and resp.json().get("data"):
                     raw = base64.b64decode(resp.json()["data"][0]["b64_json"])
                     if raw:
@@ -57,7 +60,9 @@ def generate_scenic_image(category_english: str, category_polish: str, output_pa
                         print(f"[thumbnail] gpt-image-2 thumbnail saved")
                         return output_path
             except Exception as e:
-                print(f"[thumbnail] Attempt {attempt+1} failed ({str(e)[:60]}), retrying..." if attempt < 2 else f"[thumbnail] Fallback after {attempt+1} attempts")
+                print(f"[thumbnail] Attempt {attempt+1} failed ({str(e)[:60]}), retrying..." if attempt < 3 else f"[thumbnail] Fallback after {attempt+1} attempts")
+                if attempt < 3:
+                    ttime.sleep(10 * (attempt + 1))
 
     from PIL import Image, ImageDraw, ImageFont
     img = Image.new('RGB', (1920, 1080), (45, 35, 65))
