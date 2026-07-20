@@ -1,0 +1,107 @@
+name: Velocity Polish - Daily YouTube Upload
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      category:
+        description: 'Category (optional, random if empty)'
+        required: false
+        default: ''
+      phrases:
+        description: 'Number of phrases (default: 60)'
+        required: false
+        default: '60'
+
+jobs:
+  generate-youtube-video:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download phrase history
+        uses: actions/download-artifact@v4
+        id: download-history
+        continue-on-error: true
+        with:
+          name: polish-longform-phrase-history
+          path: output/history/
+
+      - name: Initialize history if not found
+        run: |
+          mkdir -p output/history
+          if [ ! -f "output/history/all_generated_phrases.json" ]; then
+            echo '{"phrases": [], "last_updated": null}' > output/history/all_generated_phrases.json
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          echo "System dependencies installed (fonts are in repo)"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          if [ -f "upload/requirements.txt" ]; then
+            pip install -r upload/requirements.txt
+          fi
+
+      - name: Create .env file from secrets
+        run: |
+          echo "POLLINATIONS_API_KEY=${{ secrets.POLLINATIONS_API_KEY }}" >> .env
+          echo "AI_MODEL=${{ secrets.AI_MODEL || 'gemini-fast' }}" >> .env
+          echo "YT_CLIENT_ID=${{ secrets.YT_CLIENT_ID }}" >> .env
+          echo "YT_CLIENT_SECRET=${{ secrets.YT_CLIENT_SECRET }}" >> .env
+          echo "YT_REFRESH_TOKEN=${{ secrets.YT_REFRESH_TOKEN }}" >> .env
+
+      - name: Generate Long-Form YouTube Video
+        id: generate
+        run: |
+          python youtube_longform_automation.py
+          LATEST_DIR=$(ls -td output/longform_videos/*/ | head -1)
+          echo "LATEST_VIDEO_DIR=$LATEST_DIR" >> $GITHUB_OUTPUT
+
+      - name: Upload to YouTube
+        id: youtube-upload
+        continue-on-error: true
+        run: |
+          LATEST_DIR=$(ls -td output/longform_videos/*/ | head -1)
+          export YT_CLIENT_ID="${{ secrets.YT_CLIENT_ID }}"
+          export YT_CLIENT_SECRET="${{ secrets.YT_CLIENT_SECRET }}"
+          export YT_REFRESH_TOKEN="${{ secrets.YT_REFRESH_TOKEN }}"
+          export PYTHONPATH="${{ github.workspace }}/upload:$PYTHONPATH"
+          cd upload
+          python upload_youtube_longform.py
+
+      - name: Upload Video Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-polish-video-${{ github.run_number }}
+          path: |
+            ${{ steps.generate.outputs.LATEST_VIDEO_DIR }}final_video.mp4
+            ${{ steps.generate.outputs.LATEST_VIDEO_DIR }}thumbnail.jpg
+          retention-days: 7
+
+      - name: Upload Phrase History
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: polish-longform-phrase-history
+          path: output/history/all_generated_phrases.json
+          retention-days: 90
+          overwrite: true
